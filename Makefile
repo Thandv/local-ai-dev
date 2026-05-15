@@ -21,7 +21,7 @@ help:
 	@echo ""
 
 install:
-	$(PYTHON) -m pip install -e ".[dev]"
+	$(PYTHON) -m pip install "."
 
 deps:
 	$(PYTHON) -m pip install pyinstaller

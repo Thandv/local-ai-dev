@@ -1,7 +1,26 @@
 # Local AI Dev Suite
 
 A fully local AI-powered development environment — 11-stage autonomous app builder, interactive vibe coder, and quick coding assistant.
-Runs entirely on your machine by default. Optionally upgrade to the Claude API for the best available intelligence.
+
+**100% local by default. No API keys. No cloud. No data leaves your machine.**
+Optionally upgrade to the Claude API for the highest-quality output.
+
+---
+
+## Privacy & data
+
+By default, nothing you type, no code you write, and no build output ever leaves your machine:
+
+| What | Where it runs |
+|------|--------------|
+| LLM inference | Locally via [Ollama](https://ollama.com) |
+| Tool calls (file read/write, shell commands) | Locally |
+| Reference repo search (grep) | Locally, over repos cloned to disk |
+| The 11 pipeline agents | Local Python processes |
+
+The **only** network activity after install is `ai-index`, which optionally refreshes the 14 reference repos from GitHub. Everything else is offline.
+
+The [Claude backend](#model-selection) (`--model claude-opus-4-7`) is entirely opt-in — it requires you to explicitly set `ANTHROPIC_API_KEY`. Without it, no external API is ever called.
 
 ---
 
@@ -26,12 +45,22 @@ chmod +x local-ai-setup-macos   # or local-ai-setup-linux
 .\local-ai-setup-windows.exe
 ```
 
-The installer handles everything:
+The installer handles everything — no manual steps:
 - Installs [Ollama](https://ollama.com) (local LLM server)
-- Downloads `qwen2.5-coder:32b` (~20 GB coding model — best local option)
+- Downloads `qwen2.5-coder:32b` (~20 GB, best local coding model)
 - Installs the Python package and all dependencies
 - Clones 14 curated open-source repos as coding references
 - Registers the `vibe`, `build-app`, `ai`, and `ai-index` commands
+
+### Hardware requirements
+
+| RAM | Experience |
+|-----|-----------|
+| 16 GB | Works, slower (model is quantized to ~4-bit) |
+| 32 GB | Good — recommended minimum for comfortable use |
+| 64 GB+ (M2/M3 Max, etc.) | Fast, near-full quality |
+
+If you're on a tighter machine, pass `--model qwen2.5-coder:14b` (~8 GB) for a good balance of speed and quality.
 
 ---
 
@@ -48,18 +77,34 @@ The installer handles everything:
 
 ## Model Selection
 
-Every command accepts `--model` (or set `LOCAL_AI_MODEL` env var) to choose the LLM backend.
+Every command accepts `--model` (or set `LOCAL_AI_MODEL` env var once) to choose the LLM backend. The default is always local — no key needed.
 
 | Backend | Flag | Quality | Requirement |
 |---------|------|---------|-------------|
-| Ollama local (default) | `--model qwen2.5-coder:32b` | Excellent | Ollama running locally |
-| Ollama large | `--model llama3.3:70b` | Great general | 40 GB RAM |
-| **Claude (best)** | `--model claude-opus-4-7` | **State of the art** | `ANTHROPIC_API_KEY` |
-| Claude fast | `--model claude-haiku-4-5` | Fast + smart | `ANTHROPIC_API_KEY` |
+| **Ollama (default)** | `--model qwen2.5-coder:32b` | Excellent | Ollama + ~20 GB RAM |
+| Ollama (lighter) | `--model qwen2.5-coder:14b` | Good | Ollama + ~8 GB RAM |
+| Ollama (general) | `--model llama3.3:70b` | Great | Ollama + ~40 GB RAM |
+| **Claude Opus (best)** | `--model claude-opus-4-7` | **State of the art** | `ANTHROPIC_API_KEY` |
+| Claude Haiku (fast) | `--model claude-haiku-4-5` | Fast + smart | `ANTHROPIC_API_KEY` |
 
-**Using Claude:**
+Both backends **stream tokens to your terminal in real time** — no more staring at a blank screen.
+
+**Staying fully local (no key required):**
 
 ```bash
+# Default — qwen2.5-coder:32b, nothing leaves your machine
+build-app "A REST API for a todo list"
+vibe
+ai
+
+# Lighter model for machines with less RAM
+build-app --model qwen2.5-coder:14b "A Flask CRUD app"
+```
+
+**Upgrading to Claude (opt-in, requires API key):**
+
+```bash
+pip install "local-ai-dev[claude]"   # one-time
 export ANTHROPIC_API_KEY=sk-ant-...
 
 # All three commands respect --model
@@ -67,15 +112,10 @@ build-app --model claude-opus-4-7 "A SaaS app with billing"
 vibe --model claude-opus-4-7
 ai --model claude-opus-4-7
 
-# Or set it once for the whole session
+# Or set it once for the whole shell session
 export LOCAL_AI_MODEL=claude-opus-4-7
 build-app "A REST API with auth"
-
-# Install the Claude dependency
-pip install "local-ai-dev[claude]"
 ```
-
-Both backends stream tokens to your terminal in real time — no more waiting in silence.
 
 ---
 
@@ -256,8 +296,8 @@ Add more repos by editing `repos.json` and running `ai-index`.
 
 | Component | Technology |
 |-----------|-----------|
-| LLM (default) | Qwen2.5-Coder 32B (local, via Ollama) |
-| LLM (best) | Claude claude-opus-4-7 via Anthropic API (opt-in) |
+| LLM (default) | Qwen2.5-Coder 32B (local, via Ollama — no API key) |
+| LLM (best, opt-in) | claude-opus-4-7 via Anthropic API (requires `ANTHROPIC_API_KEY`) |
 | Streaming | Both backends stream tokens to stdout in real time |
 | Code retrieval | grep over 14 cloned repos (no vector DB) |
 | Runtime | Python 3.10+ |
@@ -301,7 +341,7 @@ Test coverage:
 |------|-------|---------------|
 | `test_memory.py` | 38 | Project dataclass, save\_log, summary, files\_written |
 | `test_tools.py` | 58 | All 5 tool implementations, schemas, HANDLERS |
-| `test_llm.py` | 35 | \_extract\_tool\_calls, run\_agent\_loop, chat |
+| `test_llm.py` | 31 | \_extract\_tool\_calls, run\_agent\_loop, chat (streaming mocks) |
 | `test_orchestrator.py` | 48 | Stage selection, skip flags, resume, fix(), checkpoints |
 | `test_build_cli.py` | 43 | All flag combinations, templates, --resume, --fix |
 | `test_agents.py` | 66 | All 11 agents, retry loops, cross-agent contracts |
@@ -316,7 +356,7 @@ local-ai-dev/
   src/local_ai/
     agents/
       shared/
-        llm.py           ← Ollama client + agentic tool-call loop
+        llm.py           ← multi-backend LLM client (Ollama + Claude) + agentic tool-call loop
         tools.py         ← shared tool implementations and schemas
         memory.py        ← Project state object passed through pipeline
       designer.py        ← UI/UX spec → DESIGN.md

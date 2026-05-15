@@ -25,3 +25,10 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "local_ai" = ["repos.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts   = "-v --tb=short"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]

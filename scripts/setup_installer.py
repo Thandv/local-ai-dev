@@ -73,6 +73,65 @@ def cmd_exists(name):
 def pip_install(*packages):
     run(f"{sys.executable} -m pip install --quiet {' '.join(packages)}")
 
+
+def runtime_python() -> str:
+    """Return a Python interpreter suitable for running the installed launchers.
+
+    When this installer runs as a PyInstaller frozen binary, sys.executable
+    points at the bundle itself. The bundle is unsuitable for running
+    arbitrary modules and may be removed after install, which breaks the
+    launchers we create with `{sys.executable} -m ...`. Fall back to a real
+    system Python (with pip) discovered on PATH.
+    """
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+
+    frozen_path = Path(sys.executable).resolve()
+    for name in ("python3", "python"):
+        candidate = shutil.which(name)
+        if not candidate:
+            continue
+        try:
+            if Path(candidate).resolve() == frozen_path:
+                continue
+        except OSError:
+            pass
+        r = subprocess.run([candidate, "-m", "pip", "--version"],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            return candidate
+    raise RuntimeError(
+        "No system Python 3.10+ with pip found on PATH. "
+        "Install one (e.g. `brew install python` on macOS, `apt install python3` "
+        "on Debian/Ubuntu) and re-run this installer."
+    )
+
+
+def register_with_site_packages(python: str, install_dir: Path) -> bool:
+    """Write a .pth file so `import local_ai` works from any Python session.
+
+    Tries system site-packages first; falls back to per-user site-packages
+    if the system one is not writable (e.g. macOS system Python). Returns
+    True if the .pth file was written.
+    """
+    for prog in ("import site; print(site.getsitepackages()[0])",
+                 "import site; print(site.getusersitepackages())"):
+        r = subprocess.run([python, "-c", prog],
+                           capture_output=True, text=True)
+        if r.returncode != 0 or not r.stdout.strip():
+            continue
+        site_dir = Path(r.stdout.strip())
+        try:
+            site_dir.mkdir(parents=True, exist_ok=True)
+            pth = site_dir / "local_ai_dev.pth"
+            pth.write_text(str(install_dir) + "\n")
+            info(f"Registered {install_dir} → {pth}")
+            return True
+        except (PermissionError, OSError):
+            continue
+    return False
+
+
 # ── Step functions ────────────────────────────────────────────────────────────
 
 def check_python():
@@ -191,6 +250,8 @@ def install_package(dry_run=False):
         info("[dry-run] Would install Python package")
         return
 
+    python = runtime_python()
+
     # If running as a PyInstaller bundle, the source is bundled with us
     if getattr(sys, "frozen", False):
         bundle_dir = Path(sys._MEIPASS)  # type: ignore
@@ -200,13 +261,18 @@ def install_package(dry_run=False):
             if INSTALL_DIR.exists():
                 shutil.rmtree(INSTALL_DIR)
             shutil.copytree(package_src, INSTALL_DIR)
+            # Register on the system Python so `import local_ai` works from
+            # arbitrary scripts (the installed launchers below also set
+            # PYTHONPATH as a safety belt in case this .pth write doesn't take).
+            if not register_with_site_packages(python, INSTALL_DIR):
+                warn("Could not write .pth file; launchers will set PYTHONPATH instead.")
             ok(f"Installed to {INSTALL_DIR}")
             return
 
     # Running from source — pip install from current directory
     info("Installing from source …")
     src = Path(__file__).parent.parent
-    run(f"{sys.executable} -m pip install --quiet -e {src}")
+    run(f"{python} -m pip install --quiet -e {src}")
     ok("Package installed")
 
 
@@ -272,11 +338,12 @@ def register_commands(dry_run=False):
 
 
 def _register_unix(dry_run):
+    python = runtime_python()
     bins = {
-        "vibe":      f"{sys.executable} -m local_ai.vibe",
-        "ai":        f"{sys.executable} -m local_ai.agent",
-        "ai-index":  f"{sys.executable} -m local_ai.indexer",
-        "build-app": f"{sys.executable} -m local_ai.build_cli",
+        "vibe":      "local_ai.vibe",
+        "ai":        "local_ai.agent",
+        "ai-index":  "local_ai.indexer",
+        "build-app": "local_ai.build_cli",
     }
     # Prefer /usr/local/bin if writable, else ~/.local/bin
     bin_dir = Path("/usr/local/bin")
@@ -284,12 +351,19 @@ def _register_unix(dry_run):
         bin_dir = Path.home() / ".local" / "bin"
         bin_dir.mkdir(parents=True, exist_ok=True)
 
-    for name, cmd in bins.items():
+    for name, module in bins.items():
         dest = bin_dir / name
         if dry_run:
             info(f"  [dry-run] Would write {dest}")
             continue
-        dest.write_text(f"#!/bin/bash\n{cmd} \"$@\"\n")
+        # PYTHONPATH is set per-invocation (no impact outside this launcher).
+        # It's a safety belt: even if the .pth registration during
+        # install_package() didn't take, the launcher still works.
+        dest.write_text(
+            "#!/bin/bash\n"
+            f'PYTHONPATH="{INSTALL_DIR}${{PYTHONPATH:+:$PYTHONPATH}}" '
+            f'exec "{python}" -m {module} "$@"\n'
+        )
         dest.chmod(0o755)
         ok(f"  {name} → {dest}")
 
@@ -305,21 +379,30 @@ def _register_unix(dry_run):
 
 
 def _register_windows(dry_run):
-    import winreg  # type: ignore
+    python = runtime_python()
+    # Put .cmd shims alongside the chosen runtime Python so they're on PATH
+    # via the same mechanism that puts that Python on PATH.
+    scripts_dir = Path(python).parent / "Scripts"
+    if not scripts_dir.exists():
+        scripts_dir = Path(python).parent
 
-    scripts_dir = Path(sys.executable).parent / "Scripts"
+    install_dir_win = str(INSTALL_DIR).replace("/", "\\")
     bins = {
-        "vibe.cmd":      f"@{sys.executable} -m local_ai.vibe %*\n",
-        "ai.cmd":        f"@{sys.executable} -m local_ai.agent %*\n",
-        "ai-index.cmd":  f"@{sys.executable} -m local_ai.indexer %*\n",
-        "build-app.cmd": f"@{sys.executable} -m local_ai.build_cli %*\n",
+        "vibe.cmd":      "local_ai.vibe",
+        "ai.cmd":        "local_ai.agent",
+        "ai-index.cmd":  "local_ai.indexer",
+        "build-app.cmd": "local_ai.build_cli",
     }
-    for name, content in bins.items():
+    for name, module in bins.items():
         dest = scripts_dir / name
         if dry_run:
             info(f"  [dry-run] Would write {dest}")
             continue
-        dest.write_text(content)
+        dest.write_text(
+            "@echo off\r\n"
+            f'set "PYTHONPATH={install_dir_win};%PYTHONPATH%"\r\n'
+            f'"{python}" -m {module} %*\r\n'
+        )
         ok(f"  {name} → {dest}")
 
 

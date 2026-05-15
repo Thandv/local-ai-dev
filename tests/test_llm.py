@@ -224,20 +224,31 @@ class TestRunAgentLoop:
 
 # ── chat ──────────────────────────────────────────────────────────────────────
 
+def _make_stream_lines(content="hello", tool_calls=None):
+    """Build the newline-delimited JSON bytes that Ollama streaming returns."""
+    lines = [
+        (json.dumps({"message": {"role": "assistant", "content": content}, "done": False}) + "\n").encode(),
+        (json.dumps({"message": {"role": "assistant", "content": "", "tool_calls": tool_calls}, "done": True}) + "\n").encode(),
+    ]
+    return lines
+
+
+def _mock_urlopen_streaming(lines):
+    """Return a context-manager mock whose iteration yields the given byte lines."""
+    mock_resp = MagicMock()
+    mock_resp.__iter__ = lambda s: iter(lines)
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    return mock_resp
+
+
 class TestChat:
     def test_successful_response_returned(self):
-        fake_message = {"role": "assistant", "content": "hello", "tool_calls": None}
-        fake_body = json.dumps({"message": fake_message}).encode()
-
-        with patch("urllib.request.urlopen") as mock_open:
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = fake_body
-            mock_resp.__enter__ = lambda s: s
-            mock_resp.__exit__ = MagicMock(return_value=False)
-            mock_open.return_value = mock_resp
+        lines = _make_stream_lines(content="hello")
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen_streaming(lines)):
             result = chat([{"role": "user", "content": "hi"}])
-
-        assert result == fake_message
+        assert result["content"] == "hello"
+        assert result["role"] == "assistant"
 
     def test_url_error_calls_sys_exit(self):
         import urllib.error
@@ -246,45 +257,27 @@ class TestChat:
                 chat([{"role": "user", "content": "hi"}])
 
     def test_payload_includes_model(self):
-        fake_body = json.dumps({"message": {"role": "assistant", "content": "x"}}).encode()
-        with patch("urllib.request.urlopen") as mock_open:
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = fake_body
-            mock_resp.__enter__ = lambda s: s
-            mock_resp.__exit__ = MagicMock(return_value=False)
-            mock_open.return_value = mock_resp
+        lines = _make_stream_lines(content="x")
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen_streaming(lines)) as mock_open:
             chat([])
-
         req = mock_open.call_args[0][0]
         payload = json.loads(req.data.decode())
         assert "model" in payload
         assert isinstance(payload["model"], str)
 
     def test_payload_includes_messages(self):
-        fake_body = json.dumps({"message": {"role": "assistant", "content": "x"}}).encode()
+        lines = _make_stream_lines(content="x")
         messages = [{"role": "user", "content": "test message"}]
-        with patch("urllib.request.urlopen") as mock_open:
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = fake_body
-            mock_resp.__enter__ = lambda s: s
-            mock_resp.__exit__ = MagicMock(return_value=False)
-            mock_open.return_value = mock_resp
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen_streaming(lines)) as mock_open:
             chat(messages)
-
         req = mock_open.call_args[0][0]
         payload = json.loads(req.data.decode())
         assert payload["messages"] == messages
 
-    def test_stream_is_false(self):
-        fake_body = json.dumps({"message": {"role": "assistant", "content": "x"}}).encode()
-        with patch("urllib.request.urlopen") as mock_open:
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = fake_body
-            mock_resp.__enter__ = lambda s: s
-            mock_resp.__exit__ = MagicMock(return_value=False)
-            mock_open.return_value = mock_resp
+    def test_stream_is_true(self):
+        lines = _make_stream_lines(content="x")
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen_streaming(lines)) as mock_open:
             chat([])
-
         req = mock_open.call_args[0][0]
         payload = json.loads(req.data.decode())
-        assert payload["stream"] is False
+        assert payload["stream"] is True

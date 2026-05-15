@@ -1,7 +1,7 @@
 # Local AI Dev Suite
 
 A fully local AI-powered development environment — 11-stage autonomous app builder, interactive vibe coder, and quick coding assistant.
-Runs entirely on your machine. No API keys. No cloud. No data leaves your device.
+Runs entirely on your machine by default. Optionally upgrade to the Claude API for the best available intelligence.
 
 ---
 
@@ -28,7 +28,7 @@ chmod +x local-ai-setup-macos   # or local-ai-setup-linux
 
 The installer handles everything:
 - Installs [Ollama](https://ollama.com) (local LLM server)
-- Downloads `qwen2.5-coder:7b` (~4.7 GB coding model)
+- Downloads `qwen2.5-coder:32b` (~20 GB coding model — best local option)
 - Installs the Python package and all dependencies
 - Clones 14 curated open-source repos as coding references
 - Registers the `vibe`, `build-app`, `ai`, and `ai-index` commands
@@ -43,6 +43,39 @@ The installer handles everything:
 | `vibe` | Interactive AI coding session in any directory |
 | `ai` | Quick one-off coding question or task |
 | `ai-index` | Update the 14 reference repos |
+
+---
+
+## Model Selection
+
+Every command accepts `--model` (or set `LOCAL_AI_MODEL` env var) to choose the LLM backend.
+
+| Backend | Flag | Quality | Requirement |
+|---------|------|---------|-------------|
+| Ollama local (default) | `--model qwen2.5-coder:32b` | Excellent | Ollama running locally |
+| Ollama large | `--model llama3.3:70b` | Great general | 40 GB RAM |
+| **Claude (best)** | `--model claude-opus-4-7` | **State of the art** | `ANTHROPIC_API_KEY` |
+| Claude fast | `--model claude-haiku-4-5` | Fast + smart | `ANTHROPIC_API_KEY` |
+
+**Using Claude:**
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# All three commands respect --model
+build-app --model claude-opus-4-7 "A SaaS app with billing"
+vibe --model claude-opus-4-7
+ai --model claude-opus-4-7
+
+# Or set it once for the whole session
+export LOCAL_AI_MODEL=claude-opus-4-7
+build-app "A REST API with auth"
+
+# Install the Claude dependency
+pip install "local-ai-dev[claude]"
+```
+
+Both backends stream tokens to your terminal in real time — no more waiting in silence.
 
 ---
 
@@ -223,7 +256,9 @@ Add more repos by editing `repos.json` and running `ai-index`.
 
 | Component | Technology |
 |-----------|-----------|
-| LLM | Qwen2.5-Coder 7B (local, via Ollama) |
+| LLM (default) | Qwen2.5-Coder 32B (local, via Ollama) |
+| LLM (best) | Claude claude-opus-4-7 via Anthropic API (opt-in) |
+| Streaming | Both backends stream tokens to stdout in real time |
 | Code retrieval | grep over 14 cloned repos (no vector DB) |
 | Runtime | Python 3.10+ |
 | Distribution | PyInstaller single-file binary |

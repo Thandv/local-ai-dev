@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Local AI Coding Agent
-Powered by Ollama + Qwen2.5-Coder running entirely on your machine.
+Local AI Coding Agent — quick one-off coding tasks.
+
+Model: set LOCAL_AI_MODEL env var or use --model flag.
+  Local (default): qwen2.5-coder:32b via Ollama
+  Cloud  (best):   claude-opus-4-7 (set ANTHROPIC_API_KEY)
 """
 
 import os
@@ -11,13 +14,9 @@ import subprocess
 import glob as glob_module
 from pathlib import Path
 from typing import Optional
-import urllib.request
-import urllib.error
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+from local_ai.agents.shared.llm import chat as _llm_chat, set_model, get_model
 
-OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL = "qwen2.5-coder:7b"
 MAX_TOOL_OUTPUT = 8000  # chars — truncate large outputs so context stays clean
 
 SYSTEM_PROMPT = """You are an expert AI coding assistant running locally on the user's machine.
@@ -187,29 +186,6 @@ TOOL_HANDLERS = {
     "search_code": search_code,
 }
 
-# ── Ollama API ─────────────────────────────────────────────────────────────────
-
-def call_ollama(messages: list) -> dict:
-    payload = json.dumps({
-        "model": MODEL,
-        "messages": messages,
-        "tools": TOOLS,
-        "stream": False,
-    }).encode()
-
-    req = urllib.request.Request(
-        OLLAMA_URL,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            return json.loads(resp.read().decode())
-    except urllib.error.URLError as e:
-        print(f"\nCannot reach Ollama — is it running? (`brew services start ollama`)\nError: {e}")
-        sys.exit(1)
-
 # ── Agent loop ────────────────────────────────────────────────────────────────
 
 def extract_tool_calls_from_content(content: str) -> Optional[list]:
@@ -240,8 +216,7 @@ def extract_tool_calls_from_content(content: str) -> Optional[list]:
 
 def run_agent(messages: list) -> str:
     while True:
-        response = call_ollama(messages)
-        msg = response["message"]
+        msg = _llm_chat(messages, tools=TOOLS)
         messages.append(msg)
 
         tool_calls = msg.get("tool_calls")
@@ -283,9 +258,16 @@ def run_agent(messages: list) -> str:
 # ── REPL ──────────────────────────────────────────────────────────────────────
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(prog="ai", add_help=False)
+    parser.add_argument("--model", "-m", default=None)
+    args, _ = parser.parse_known_args()
+    if args.model:
+        set_model(args.model)
+
     project_dir = Path.cwd()
     print(f"\n  Local AI Coding Agent")
-    print(f"  Model : {MODEL}")
+    print(f"  Model : {get_model()}")
     print(f"  Project: {project_dir}")
     print(f"  Type 'exit' or Ctrl+C to quit, 'clear' to reset conversation\n")
 

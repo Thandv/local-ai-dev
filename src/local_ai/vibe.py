@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
 Vibe Coder — tell it your idea, it builds the full app.
-Powered by Ollama + Qwen2.5-Coder + live grep-based retrieval from
+Powered by Ollama or Claude API + live grep-based retrieval from
 cloned open-source repos. No vector DB required — just fast, precise search.
+
+Model: set LOCAL_AI_MODEL env var or use --model flag.
+  Local (default): qwen2.5-coder:32b via Ollama
+  Cloud  (best):   claude-opus-4-7 (set ANTHROPIC_API_KEY)
 """
 
 import os
@@ -13,13 +17,11 @@ import glob as glob_module
 import re
 from pathlib import Path
 from typing import Optional
-import urllib.request
-import urllib.error
+
+from local_ai.agents.shared.llm import chat as _llm_chat, set_model, get_model
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-OLLAMA_URL  = "http://localhost:11434/api/chat"
-MODEL       = "qwen2.5-coder:7b"
 REPOS_DIR   = Path.home() / ".local-ai" / "repos"
 RAG_SNIPPETS = 5      # max snippets to inject per query
 SNIPPET_LINES = 40    # lines per snippet
@@ -243,26 +245,6 @@ TOOL_HANDLERS = {
     "search_code": search_code,
 }
 
-# ── Ollama ────────────────────────────────────────────────────────────────────
-
-def call_ollama(messages: list) -> dict:
-    payload = json.dumps({
-        "model": MODEL,
-        "messages": messages,
-        "tools": TOOLS,
-        "stream": False,
-    }).encode()
-    req = urllib.request.Request(
-        OLLAMA_URL, data=payload,
-        headers={"Content-Type": "application/json"}, method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            return json.loads(resp.read().decode())
-    except urllib.error.URLError as e:
-        print(f"\nCannot reach Ollama: {e}")
-        sys.exit(1)
-
 def extract_json_tool_call(content: str) -> Optional[list]:
     """Extract one or more tool-call JSON objects embedded in the content field."""
     if not content:
@@ -293,8 +275,7 @@ def extract_json_tool_call(content: str) -> Optional[list]:
 
 def run_agent(messages: list) -> str:
     while True:
-        response = call_ollama(messages)
-        msg = response["message"]
+        msg = _llm_chat(messages, tools=TOOLS)
         messages.append(msg)
 
         tool_calls = msg.get("tool_calls") or extract_json_tool_call(msg.get("content", ""))
@@ -331,9 +312,16 @@ def repos_status() -> str:
     return f"{len(repos)} repos: {', '.join(repos)}" if repos else "No repos cloned yet — run: ai-index"
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(prog="vibe", add_help=False)
+    parser.add_argument("--model", "-m", default=None)
+    args, _ = parser.parse_known_args()
+    if args.model:
+        set_model(args.model)
+
     project_dir = Path.cwd()
     print("\n  Local Vibe Coder")
-    print(f"  Model  : {MODEL}")
+    print(f"  Model  : {get_model()}")
     print(f"  Project: {project_dir}")
     print(f"  Refs   : {repos_status()}")
     print("  Type 'exit' to quit, 'clear' to reset\n")

@@ -52,7 +52,7 @@ IS_WIN  = OS == "Windows"
 
 INSTALL_DIR = Path.home() / "Claude"
 REPOS_DIR   = Path.home() / ".local-ai" / "repos"
-MODEL       = "qwen2.5-coder:7b"
+MODEL       = "qwen2.5-coder:32b"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

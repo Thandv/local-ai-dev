@@ -17,6 +17,7 @@ import argparse
 from pathlib import Path
 
 from local_ai import orchestrator
+from local_ai.agents.shared import llm as _llm
 
 # Canned preambles that guide the pipeline for common app shapes
 TEMPLATES = {
@@ -69,6 +70,16 @@ def main():
         metavar="TYPE",
         help=f"Pre-populate instruction with a template ({', '.join(TEMPLATES)})",
     )
+    parser.add_argument(
+        "--model", "-m",
+        metavar="MODEL",
+        help=(
+            "LLM backend and model. Examples: "
+            "qwen2.5-coder:32b (default Ollama), "
+            "claude-opus-4-7 (best, needs ANTHROPIC_API_KEY), "
+            "llama3.3:70b"
+        ),
+    )
 
     # ── Workflow modes ─────────────────────────────────────────────────────────
     parser.add_argument(
@@ -102,6 +113,9 @@ def main():
     parser.add_argument("--no-designer", action="store_true", help="Skip Designer agent")
 
     args = parser.parse_args()
+
+    if args.model:
+        _llm.set_model(args.model)
 
     # ── --fix mode ────────────────────────────────────────────────────────────
     if args.fix:

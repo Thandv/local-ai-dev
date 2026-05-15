@@ -1,0 +1,125 @@
+name: Build & Release Binaries
+
+on:
+  push:
+    tags:
+      - "v*"           # triggers on v1.0.0, v1.2.3, etc.
+  workflow_dispatch:   # allows manual trigger from GitHub UI
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: local-ai-setup-macos
+            binary: dist/local-ai-setup
+          - os: ubuntu-latest
+            artifact: local-ai-setup-linux
+            binary: dist/local-ai-setup
+          - os: windows-latest
+            artifact: local-ai-setup-windows
+            binary: dist/local-ai-setup.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e .
+
+      - name: Build binary (macOS / Linux)
+        if: runner.os != 'Windows'
+        run: make binary
+
+      - name: Build binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pyinstaller --onefile --clean --name local-ai-setup `
+            --add-data "src/local_ai/repos.json;." `
+            --add-data "src;package" `
+            scripts/setup_installer.py
+
+      - name: Rename artifact
+        shell: bash
+        run: |
+          mkdir -p release
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp dist/local-ai-setup.exe release/${{ matrix.artifact }}.exe
+          else
+            cp ${{ matrix.binary }} release/${{ matrix.artifact }}
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release/
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Local AI Dev Suite ${{ github.ref_name }}"
+          body: |
+            ## Local AI Dev Suite ${{ github.ref_name }}
+
+            Download the binary for your platform and run it — it handles everything.
+
+            | Platform | Download |
+            |----------|----------|
+            | macOS (Apple Silicon / Intel) | `local-ai-setup-macos` |
+            | Linux (x86_64) | `local-ai-setup-linux` |
+            | Windows | `local-ai-setup-windows.exe` |
+
+            ### Quick install
+
+            **macOS / Linux**
+            ```bash
+            chmod +x local-ai-setup-macos   # or local-ai-setup-linux
+            ./local-ai-setup-macos
+            ```
+
+            **Windows**
+            ```powershell
+            .\local-ai-setup-windows.exe
+            ```
+
+            ### What it installs
+            - Ollama (local LLM server)
+            - qwen2.5-coder:7b (coding-specialist model, ~4.7 GB)
+            - The `vibe`, `build-app`, `ai`, and `ai-index` commands
+            - 14 curated open-source repos as coding references
+          files: release/*
+          draft: false
+          prerelease: false

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "local-ai-dev"
+version = "1.0.0"
+description = "Local AI coding assistant — vibe coder + multi-agent app builder"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "chromadb>=0.5",
+    "requests>=2.31",
+]
+
+[project.scripts]
+vibe      = "local_ai.vibe:main"
+ai        = "local_ai.agent:main"
+ai-index  = "local_ai.indexer:main"
+build-app = "local_ai.build_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"local_ai" = ["repos.json"]

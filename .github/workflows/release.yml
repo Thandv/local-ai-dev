@@ -3,16 +3,74 @@ name: Build & Release Binaries
 on:
   push:
     tags:
-      - "v*"           # triggers on v1.0.0, v1.2.3, etc.
+      - "v*"           # triggers on v2.0.0, v2.1.0, etc.
   workflow_dispatch:   # allows manual trigger from GitHub UI
 
 permissions:
   contents: write
 
 jobs:
+  test:
+    name: Smoke test agents
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.3.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install .
+
+      - name: Verify all agents import cleanly
+        run: |
+          python - <<'EOF'
+          from local_ai.agents import (
+              researcher, architect, coder, tester, reviewer,
+              designer, debugger, devops, migrator, auditor, packager,
+          )
+          from local_ai.agents.shared.memory import Project
+          from local_ai import orchestrator
+          from local_ai.build_cli import main, TEMPLATES
+          from pathlib import Path
+          import tempfile, inspect
+
+          # Check all 11 agents have a run() function
+          agents = [
+              researcher, architect, coder, tester, reviewer,
+              designer, debugger, devops, migrator, auditor, packager,
+          ]
+          for agent in agents:
+              assert callable(getattr(agent, "run", None)), f"{agent.__name__} missing run()"
+
+          # Check Project dataclass has all expected fields
+          p = Project(instruction="test", output_dir=Path(tempfile.mkdtemp()))
+          assert hasattr(p, "design")
+          assert hasattr(p, "debug_log")
+          assert hasattr(p, "audit")
+          assert hasattr(p, "packaged")
+
+          # Check orchestrator.run and orchestrator.fix are callable
+          assert callable(orchestrator.run)
+          assert callable(orchestrator.fix)
+
+          # Check all 5 templates are defined
+          assert set(TEMPLATES.keys()) == {"saas", "api", "dashboard", "cli", "fullstack"}
+
+          print("All agents OK — 11 agents, all fields, all CLI templates verified")
+          EOF
+
   build:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    needs: test
     strategy:
       matrix:
         include:
@@ -94,7 +152,7 @@ jobs:
           body: |
             ## Local AI Dev Suite ${{ github.ref_name }}
 
-            Download the binary for your platform and run it — it handles everything.
+            Download the binary for your platform and run it — it sets up everything automatically.
 
             | Platform | Download |
             |----------|----------|
@@ -120,6 +178,36 @@ jobs:
             - qwen2.5-coder:7b (coding-specialist model, ~4.7 GB)
             - The `vibe`, `build-app`, `ai`, and `ai-index` commands
             - 14 curated open-source repos as coding references
+
+            ### What's new in v2.0 — 11-stage autonomous pipeline
+
+            `build-app` now runs 11 specialised agents end-to-end:
+
+            | Stage | Agent | What it does |
+            |-------|-------|-------------|
+            | 1 | **Designer** | Writes `DESIGN.md` — screens, component tree, theme tokens |
+            | 2 | **Researcher** | Identifies tech stack and gathers patterns from reference repos |
+            | 3 | **Architect** | Produces exhaustive `PLAN.md` with full file tree and API design |
+            | 4 | **Migrator** | Generates DB schema, Alembic/Prisma migrations, and seed data |
+            | 5 | **Coder** | Writes every source file, installs dependencies |
+            | 6 | **Debugger** | Runs startup checks and fixes errors in a retry loop (up to 5×) |
+            | 7 | **Tester** | Writes and runs tests, auto-fixes failures (up to 3×) |
+            | 8 | **Auditor** | Security scan (bandit/npm audit), fixes critical issues, writes `SECURITY.md` |
+            | 9 | **DevOps** | Writes `Dockerfile`, `docker-compose.yml`, GitHub Actions CI, `Makefile` |
+            | 10 | **Reviewer** | Final code quality pass, writes `REVIEW.md` |
+            | 11 | **Packager** | Writes full `README.md`, generates `openapi.yaml`, runs `git init` |
+
+            ### New CLI flags
+            ```
+            build-app --interactive      # confirm PLAN.md before coding starts
+            build-app --resume <dir>     # pick up a failed build where it left off
+            build-app --fix <dir>        # run Debugger only on an existing build
+            build-app --template saas   # pre-baked templates: saas, api, dashboard, cli, fullstack
+            build-app --no-debug        # skip individual stages to go faster
+            build-app --no-devops
+            build-app --no-audit
+            build-app --no-package
+            ```
           files: release/*
           draft: false
           prerelease: false

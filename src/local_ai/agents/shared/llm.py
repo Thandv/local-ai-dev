@@ -19,14 +19,20 @@ from typing import Optional
 # ── Backend selection ─────────────────────────────────────────────────────────
 
 OLLAMA_URL    = "http://localhost:11434/api/chat"
-DEFAULT_MODEL = os.environ.get("LOCAL_AI_MODEL", "qwen2.5-coder:32b")
+OLLAMA_TAGS   = "http://localhost:11434/api/tags"
+
+# The installer pulls qwen2.5-coder:7b by default (works on 16 GB Macs).
+# We match that here so a fresh install "just works" without --model.
+DEFAULT_MODEL = os.environ.get("LOCAL_AI_MODEL", "qwen2.5-coder:7b")
 _ACTIVE_MODEL = DEFAULT_MODEL
+_MODEL_RESOLVED = False  # have we verified the active model exists in Ollama?
 
 
 def set_model(model: str):
     """Override the active model at runtime (e.g. from --model CLI flag)."""
-    global _ACTIVE_MODEL
-    _ACTIVE_MODEL = model
+    global _ACTIVE_MODEL, _MODEL_RESOLVED
+    _ACTIVE_MODEL   = model
+    _MODEL_RESOLVED = False  # re-check on next chat() call
 
 
 def get_model() -> str:
@@ -35,6 +41,55 @@ def get_model() -> str:
 
 def _is_claude(model: str) -> bool:
     return model.startswith("claude")
+
+
+def _list_ollama_models() -> list[str]:
+    """Return the list of model tags pulled in the local Ollama. Empty on error."""
+    try:
+        with urllib.request.urlopen(OLLAMA_TAGS, timeout=5) as resp:
+            data = json.loads(resp.read())
+        return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+    except Exception:
+        return []
+
+
+def _resolve_active_model() -> None:
+    """Verify the active model is pulled. If not, fall back to a same-family
+    model that IS pulled, with a clear notice. Claude models skip this check."""
+    global _ACTIVE_MODEL, _MODEL_RESOLVED
+    if _MODEL_RESOLVED:
+        return
+    if _is_claude(_ACTIVE_MODEL):
+        _MODEL_RESOLVED = True
+        return
+
+    available = _list_ollama_models()
+    if not available:
+        # Ollama unreachable — let chat() emit its own connection error
+        _MODEL_RESOLVED = True
+        return
+
+    if _ACTIVE_MODEL in available:
+        _MODEL_RESOLVED = True
+        return
+
+    # Fall back: prefer same family (e.g. qwen2.5-coder:* if asked for qwen2.5-coder:32b)
+    family = _ACTIVE_MODEL.split(":")[0]
+    family_matches = [m for m in available if m.startswith(family + ":")]
+    if family_matches:
+        # Pick the largest tag that's pulled. Sort by size hint in tag string.
+        family_matches.sort(key=lambda m: (
+            -int("".join(ch for ch in m.split(":")[-1] if ch.isdigit()) or "0")
+        ))
+        chosen = family_matches[0]
+    else:
+        chosen = available[0]  # arbitrary — better than 404
+
+    print(f"\n[LLM] Requested model {_ACTIVE_MODEL!r} is not pulled in Ollama. "
+          f"Falling back to {chosen!r}. "
+          f"To pull the requested model: `ollama pull {_ACTIVE_MODEL}`.\n")
+    _ACTIVE_MODEL   = chosen
+    _MODEL_RESOLVED = True
 
 
 # ── Ollama backend ─────────────────────────────────────────────────────────────
@@ -213,6 +268,7 @@ def chat(messages: list, tools: list = None, timeout: int = 180) -> dict:
     Streams tokens to stdout and returns the assembled message dict:
       {"role": "assistant", "content": str, "tool_calls": list | None}
     """
+    _resolve_active_model()
     model = _ACTIVE_MODEL
     if _is_claude(model):
         return _claude_chat(messages, tools, model, timeout)
@@ -244,6 +300,14 @@ def _extract_tool_calls(content: str) -> Optional[list]:
     return calls or None
 
 
+def _call_signature(name: str, args: dict) -> str:
+    """Stable string signature of a tool call, used by the no-progress detector."""
+    try:
+        return f"{name}:{json.dumps(args, sort_keys=True, default=str)[:400]}"
+    except Exception:
+        return f"{name}:{str(args)[:400]}"
+
+
 def run_agent_loop(
     system: str,
     user: str,
@@ -251,6 +315,8 @@ def run_agent_loop(
     handlers: dict,
     history: list = None,
     on_tool_call=None,
+    max_rounds: int = 20,
+    repeat_limit: int = 3,
 ) -> str:
     """
     Full agentic loop:
@@ -260,13 +326,19 @@ def run_agent_loop(
 
     Tool call IDs (present when using Claude) are forwarded in tool result
     messages so the Claude backend can reconstruct its conversation format.
+
+    No-progress detector: if the model issues the same tool call (same name +
+    same args) `repeat_limit` times in a row, the loop returns early. This
+    prevents pathological loops like running `pytest tests/` 15 times when
+    there are no tests to find.
     """
     messages = list(history or [])
     messages.insert(0, {"role": "system", "content": system})
     messages.append({"role": "user", "content": user})
 
-    MAX_ROUNDS = 20
-    for _ in range(MAX_ROUNDS):
+    recent_signatures: list[str] = []
+
+    for round_n in range(max_rounds):
         msg = chat(messages, tools=tools)
         messages.append(msg)
 
@@ -279,6 +351,32 @@ def run_agent_loop(
             raw         = call["function"].get("arguments", {})
             args        = json.loads(raw) if isinstance(raw, str) else raw
             tool_use_id = call.get("id")  # present for Claude tool calls
+
+            # ── No-progress detector ─────────────────────────────────────
+            sig = _call_signature(name, args)
+            recent_signatures.append(sig)
+            recent_signatures = recent_signatures[-repeat_limit:]
+            if (len(recent_signatures) == repeat_limit
+                    and len(set(recent_signatures)) == 1):
+                print(f"\n    [agent] no-progress detector: {name!r} called "
+                      f"{repeat_limit} times with the same args — ending loop early.")
+                # Tell the model so it stops requesting the same call
+                stop_note = (
+                    f"\n[loop guard] You called {name} with the same arguments "
+                    f"{repeat_limit} times in a row. That tool will not advance the "
+                    f"task further. Stop calling it and respond with a plain text "
+                    f"summary of what you've accomplished and what's blocking you.")
+                messages.append({"role": "user", "content": stop_note})
+                # Append the result one last time so the conversation is consistent
+                handler = handlers.get(name)
+                result  = handler(**args) if handler else f"Unknown tool: {name}"
+                tool_msg: dict = {"role": "tool", "content": result}
+                if tool_use_id:
+                    tool_msg["tool_use_id"] = tool_use_id
+                messages.append(tool_msg)
+                # One more round, no tools, to extract a text answer
+                final = chat(messages, tools=[])
+                return (final.get("content") or "").strip()
 
             if on_tool_call:
                 on_tool_call(name, args)

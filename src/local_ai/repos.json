@@ -74,6 +74,16 @@
       "url": "https://github.com/pmndrs/zustand",
       "description": "Zustand – lightweight React state management",
       "tags": ["react", "state", "frontend"]
+    },
+    {
+      "url": "https://github.com/tiangolo/typer",
+      "description": "Typer – modern Python CLI framework on top of click",
+      "tags": ["python", "cli"]
+    },
+    {
+      "url": "https://github.com/Textualize/rich",
+      "description": "Rich – beautiful terminal output: colour, progress bars, tables",
+      "tags": ["python", "cli", "terminal"]
     }
   ]
 }

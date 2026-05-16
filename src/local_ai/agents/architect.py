@@ -72,9 +72,15 @@ After writing the plan, respond with a short summary of the architecture.
 
     project.plan = result
 
-    # Also capture PLAN.md content if it was written
+    # Save PLAN.md. Some models return the plan as prose without calling
+    # write_file — the response text IS the plan, so fall back to writing
+    # it ourselves. Without this, the downstream Coder has no PLAN.md to
+    # follow and produces stubs.
     plan_path = project.output_dir / "PLAN.md"
-    if plan_path.exists():
+    if not plan_path.exists() and (result or "").strip():
+        plan_path.write_text(result, encoding="utf-8")
+        print(f"    [fallback-write] {plan_path}")
+    if plan_path.exists() and str(plan_path) not in project.files_written:
         project.files_written.append(str(plan_path))
 
     print("  [Architect] Done.\n")

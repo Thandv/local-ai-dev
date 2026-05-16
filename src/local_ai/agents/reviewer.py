@@ -81,5 +81,15 @@ Review all source files, fix any critical issues, then write REVIEW.md to {out}/
         on_tool_call=on_call,
     )
 
+    # Same fallback pattern as the Architect: if the model returned prose
+    # without calling write_file, persist the review text as REVIEW.md so
+    # the Packager has something to reference.
+    review_path = project.output_dir / "REVIEW.md"
+    if not review_path.exists() and (project.review or "").strip():
+        review_path.write_text(project.review, encoding="utf-8")
+        print(f"    [fallback-write] {review_path}")
+    if review_path.exists() and str(review_path) not in project.files_written:
+        project.files_written.append(str(review_path))
+
     print("  [Reviewer] Done.\n")
     return project

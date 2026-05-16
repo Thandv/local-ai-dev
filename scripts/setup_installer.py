@@ -52,7 +52,12 @@ IS_WIN  = OS == "Windows"
 
 INSTALL_DIR = Path.home() / "Claude"
 REPOS_DIR   = Path.home() / ".local-ai" / "repos"
-MODEL       = "qwen2.5-coder:32b"
+# Default model the installer pulls. Must match the runtime default in
+# llm.py (LOCAL_AI_MODEL → DEFAULT_MODEL) — otherwise the installer pulls
+# a 19 GB model that the build-app pipeline never uses, since build-app
+# falls back to whatever same-family model IS pulled via
+# _resolve_active_model(). Keep these two in sync.
+MODEL       = "qwen2.5-coder:7b"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

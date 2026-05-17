@@ -70,11 +70,31 @@ def run(project: Project) -> Project:
         f"alone to design and write a complete minimum-viable implementation.\n\n"
     )
 
+    # RAG++ — concrete reference code snippets from real repos
+    snippets_block = ""
+    if (getattr(project, "research_snippets", "") or "").strip():
+        snippets_block = (
+            f"Reference code snippets from real open-source repos — use these "
+            f"to ground your implementation in real, idiomatic patterns "
+            f"(do NOT copy verbatim; adapt the style and structure to this project):\n\n"
+            f"---\n{project.research_snippets[:6000]}\n---\n\n"
+        )
+
+    # Few-shot exemplars — previous successful builds from similar prompts
+    exemplars_block = ""
+    if (getattr(project, "exemplars", "") or "").strip():
+        exemplars_block = (
+            f"Examples from past successful builds with similar prompts. The "
+            f"shape and structure of these is what 'done' looks like for this "
+            f"toolchain — match their level of completeness and idiomatic use:\n\n"
+            f"---\n{project.exemplars[:8000]}\n---\n\n"
+        )
+
     task = f"""Project: {project.instruction}
 
 Output directory: {out}
 
-{plan_block}TASK:
+{plan_block}{snippets_block}{exemplars_block}TASK:
 1. Implement every file the plan describes by calling write_file for each one,
    with full paths under {out}/.
 2. After all source files are written, install dependencies by calling

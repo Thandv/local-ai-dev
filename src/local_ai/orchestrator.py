@@ -189,6 +189,19 @@ def run(
         print(f"  Completed in {elapsed:.1f}s")
 
     project.save_log()
+
+    # If the build genuinely succeeded under the strict success criterion,
+    # snapshot it into the exemplar library so future builds with similar
+    # instructions get it as a few-shot example.
+    if project.success:
+        try:
+            from local_ai import exemplars
+            saved = exemplars.save_exemplar(project)
+            if saved:
+                print(f"\n  [exemplar] Saved successful build to {saved}")
+        except Exception as e:
+            print(f"\n  [exemplar] Save failed (non-fatal): {e}")
+
     print(project.summary())
     return project
 

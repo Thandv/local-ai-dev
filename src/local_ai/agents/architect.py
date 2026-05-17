@@ -32,11 +32,19 @@ def run(project: Project) -> Project:
 
     out = str(project.output_dir)
 
+    snippets_block = ""
+    if (project.research_snippets or "").strip():
+        snippets_block = (
+            f"\nReference code snippets from real open-source repos (verbatim "
+            f"— use these to ground concrete library choices and patterns):\n"
+            f"{project.research_snippets[:6000]}\n"
+        )
+
     task = f"""Instruction: {project.instruction}
 
 Research Brief:
 {project.research}
-
+{snippets_block}
 Output directory: {out}
 
 Create a complete PLAN.md at {out}/PLAN.md that covers:

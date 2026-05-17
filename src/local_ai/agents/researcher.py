@@ -62,6 +62,27 @@ def run(project: Project) -> Project:
     keywords = _extract_keywords(project.instruction)
     repo_patterns = grep_repos(keywords)
 
+    # ── RAG++ ────────────────────────────────────────────────────────────
+    # Persist the raw grep snippets on the project so downstream agents
+    # (Architect, Coder) can see real example code, not just the LLM's
+    # paraphrased brief. Without this, valuable concrete patterns get
+    # summarised away into prose by the Researcher's response and the
+    # Coder has nothing to copy from.
+    project.research_snippets = repo_patterns
+
+    # ── Few-shot exemplars from past successful builds ───────────────────
+    # Load up to 2 similar past builds (by instruction keyword overlap).
+    # These give the Coder concrete examples of what a finished project
+    # of this shape looks like. Empty string when no library yet.
+    from local_ai import exemplars as _exemplars  # local import to avoid cycle
+    project.exemplars = _exemplars.render_exemplars_block(
+        project.instruction, k=2,
+    )
+    if project.exemplars:
+        n_matches = project.exemplars.count("### Past build")
+        print(f"  [Researcher] Loaded {n_matches} similar exemplar(s) "
+              f"from ~/.local-ai/exemplars/")
+
     sparse_grep = (
         "No relevant patterns found" in repo_patterns
         or len(repo_patterns) < 400
@@ -69,7 +90,9 @@ def run(project: Project) -> Project:
     if sparse_grep:
         sparse_note = ("\n\n⚠ The curated grep returned little. You should use "
                        "search_github / peek_readme / clone_shallow to find "
-                       "domain-relevant repos before proceeding.")
+                       "domain-relevant repos before proceeding. After cloning, "
+                       "a second grep happens automatically when the downstream "
+                       "Architect runs.")
     else:
         sparse_note = ""
 
@@ -122,6 +145,15 @@ Write a research brief covering:
         handlers=handlers,
         on_tool_call=on_call,
     )
+
+    # If the Researcher cloned a new repo, re-grep to capture its patterns
+    # for downstream agents. The discovered cache is now searchable too.
+    if sparse_grep:
+        refreshed = grep_repos(keywords)
+        if refreshed and refreshed != repo_patterns and "No relevant" not in refreshed:
+            project.research_snippets = refreshed
+            print(f"  [Researcher] Refreshed snippets after clone: "
+                  f"{len(refreshed)} chars")
 
     print("  [Researcher] Done.\n")
     return project

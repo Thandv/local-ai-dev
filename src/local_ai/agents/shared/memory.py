@@ -30,16 +30,18 @@ class Project:
     output_dir: Path              # Where all files are written
 
     # Populated by each agent in sequence
-    design:        str = ""       # Designer agent output (UI/UX spec)
-    research:      str = ""       # Researcher agent output
-    plan:          str = ""       # Architect agent plan (also written to PLAN.md)
-    files_written: list = field(default_factory=list)  # Paths written by all agents
-    debug_log:     str = ""       # Debugger agent output
-    test_results:  str = ""       # Tester output
-    audit:         str = ""       # Auditor agent output
-    review:        str = ""       # Reviewer output
-    packaged:      bool = False   # Whether Packager ran successfully
-    success:       bool = False   # Did the test/build gates pass?
+    design:           str = ""    # Designer agent output (UI/UX spec)
+    research:         str = ""    # Researcher agent output (LLM's brief)
+    research_snippets: str = ""   # Raw grep_repos snippets (verbatim, RAG++)
+    exemplars:        str = ""    # Few-shot block from past successful builds
+    plan:             str = ""    # Architect agent plan (also written to PLAN.md)
+    files_written:    list = field(default_factory=list)
+    debug_log:        str = ""    # Debugger agent output
+    test_results:     str = ""    # Tester output
+    audit:            str = ""    # Auditor agent output
+    review:           str = ""    # Reviewer output
+    packaged:         bool = False
+    success:          bool = False
 
     # Why the final SUCCESS / INCOMPLETE verdict was reached, populated by
     # compute_final_success() at the end of the pipeline.

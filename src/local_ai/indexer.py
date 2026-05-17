@@ -3,8 +3,14 @@
 Repo Cloner — clones curated high-quality GitHub repos locally so the
 vibe-coder agent can grep them for real working patterns at query time.
 No embeddings or vector DB needed — just fast grep-based search.
+
+Usage:
+  ai-index            clone or update every repo in repos.json
+  ai-index 5          clone only the first 5 (handy for testing)
+  ai-index --help     show this help
 """
 
+import argparse
 import json
 import subprocess
 import sys
@@ -60,6 +66,23 @@ def build_index(repos_json: Path = REPOS_JSON, limit: int = 0):
     print("\nYour vibe coder will now search these repos for patterns when you ask it to build something.")
 
 
+def main():
+    parser = argparse.ArgumentParser(
+        prog="ai-index",
+        description=("Clone or update the curated reference repos so the "
+                     "vibe coder and build-app pipeline can grep them for "
+                     "real code patterns."),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "limit", nargs="?", type=int, default=0,
+        help=("Optional integer — clone only the first N repos from "
+              "repos.json. Useful for testing on a slow connection. "
+              "Default 0 = clone all."),
+    )
+    args = parser.parse_args()
+    build_index(limit=args.limit)
+
+
 if __name__ == "__main__":
-    limit = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-    build_index(limit=limit)
+    main()

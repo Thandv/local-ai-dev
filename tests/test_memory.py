@@ -88,10 +88,20 @@ class TestSaveLog:
         assert log["success"] is False
 
     def test_log_reflects_success_true(self, project):
+        # Under the strict success criterion introduced in v2.0.2,
+        # save_log() recomputes success against (PLAN.md exists,
+        # ≥2 source files, ≥30 LOC). Build the minimum-viable artefacts
+        # so the criterion passes.
+        (project.output_dir / "PLAN.md").write_text("# plan\n", encoding="utf-8")
+        for name in ("a.py", "b.py"):
+            (project.output_dir / name).write_text(
+                "\n".join(f"x{i} = {i}" for i in range(20)) + "\n",
+                encoding="utf-8")
         project.success = True
         project.save_log()
         log = json.loads((project.output_dir / "BUILD_LOG.json").read_text())
         assert log["success"] is True
+        assert log["success_reason"] == "all gates passed"
 
     def test_log_reflects_packaged(self, project):
         project.packaged = True
@@ -118,8 +128,18 @@ class TestSaveLog:
         assert isinstance(parsed, dict)
 
     def test_log_overwrites_on_second_save(self, project):
-        project.success = False
+        # First save: no artefacts → success stays False.
+        project.success = True
         project.save_log()
+        log = json.loads((project.output_dir / "BUILD_LOG.json").read_text())
+        assert log["success"] is False  # strict criterion flipped it
+
+        # Now add the required artefacts and re-save: success becomes True.
+        (project.output_dir / "PLAN.md").write_text("# plan\n", encoding="utf-8")
+        for name in ("a.py", "b.py"):
+            (project.output_dir / name).write_text(
+                "\n".join(f"x{i} = {i}" for i in range(20)) + "\n",
+                encoding="utf-8")
         project.success = True
         project.save_log()
         log = json.loads((project.output_dir / "BUILD_LOG.json").read_text())

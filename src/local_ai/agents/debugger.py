@@ -9,7 +9,10 @@ from .shared.llm import run_agent_loop
 from .shared.tools import READ_FILE, WRITE_FILE, LIST_FILES, RUN_COMMAND, SEARCH_CODE, HANDLERS
 from .shared.memory import Project
 
-MAX_ATTEMPTS = 5
+# Capped at 3 (was 5). Each attempt is a full run_agent_loop call bounded
+# by its time_budget_s; the Debugger observed in v2.0.2 running for 3.6
+# hours when this was 5.
+MAX_ATTEMPTS = 3
 
 SYSTEM = """You are a senior engineer debugging a freshly generated application.
 

@@ -315,8 +315,9 @@ def run_agent_loop(
     handlers: dict,
     history: list = None,
     on_tool_call=None,
-    max_rounds: int = 20,
+    max_rounds: int = 10,
     repeat_limit: int = 3,
+    time_budget_s: int = 600,
 ) -> str:
     """
     Full agentic loop:
@@ -327,18 +328,40 @@ def run_agent_loop(
     Tool call IDs (present when using Claude) are forwarded in tool result
     messages so the Claude backend can reconstruct its conversation format.
 
-    No-progress detector: if the model issues the same tool call (same name +
-    same args) `repeat_limit` times in a row, the loop returns early. This
-    prevents pathological loops like running `pytest tests/` 15 times when
-    there are no tests to find.
+    Termination is bounded by three independent guards:
+      - max_rounds       — hard upper bound on iterations (default 10).
+      - repeat_limit     — kills the loop when the same tool call is requested
+                           N times in a row (no-progress detector, default 3).
+      - time_budget_s    — wall-clock cap (default 600s / 10 min). Without
+                           this, a verbose 7B model can keep generating
+                           plausible-looking tool calls for hours, exceeding
+                           any reasonable user expectation. When the budget
+                           expires the loop appends a stop note and asks the
+                           model for a plain-text summary.
     """
     messages = list(history or [])
     messages.insert(0, {"role": "system", "content": system})
     messages.append({"role": "user", "content": user})
 
     recent_signatures: list[str] = []
+    loop_start = time.monotonic()
 
     for round_n in range(max_rounds):
+        elapsed = time.monotonic() - loop_start
+        if elapsed > time_budget_s:
+            print(f"\n    [agent] time budget {time_budget_s}s exceeded "
+                  f"({elapsed:.0f}s elapsed) — ending loop early.")
+            messages.append({
+                "role": "user",
+                "content": (
+                    f"[loop guard] Time budget of {time_budget_s}s exceeded "
+                    f"after {elapsed:.0f}s. Stop calling tools and respond "
+                    f"with a plain text summary of what you have accomplished."
+                ),
+            })
+            final = chat(messages, tools=[])
+            return (final.get("content") or "").strip()
+
         msg = chat(messages, tools=tools)
         messages.append(msg)
 

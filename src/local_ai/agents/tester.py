@@ -9,7 +9,10 @@ from .shared.llm import run_agent_loop
 from .shared.tools import READ_FILE, WRITE_FILE, LIST_FILES, RUN_COMMAND, SEARCH_CODE, HANDLERS
 from .shared.memory import Project
 
-MAX_ATTEMPTS = 3
+# Capped at 2 (was 3). Each attempt is a full run_agent_loop call that can
+# take up to its time_budget_s; the Tester observed in v2.0.2 running for
+# 6+ hours when this was 3.
+MAX_ATTEMPTS = 2
 
 SYSTEM = """You are a senior QA engineer and software tester.
 
